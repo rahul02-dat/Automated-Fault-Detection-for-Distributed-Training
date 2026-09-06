@@ -1,0 +1,4 @@
+torch
+pytest>=8.0
+numpy
+pyyaml

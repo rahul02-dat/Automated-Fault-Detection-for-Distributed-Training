@@ -1,0 +1,14 @@
+experiment_id: ema_smoke_fixed
+workload:
+  name: tiny_transformer
+  config:
+    variant: fixed
+distributed:
+  world_size: 2
+  backend: gloo
+training:
+  seed: 0
+  total_steps: 10
+  checkpoint_steps: [5]
+  resume_steps: [5]
+fault: ema_scalar_omission
