@@ -84,7 +84,9 @@ class TinyTransformerWorkload(Workload):
             StateContract(
                 name="optimizer",
                 scope=StateScope.REPLICATED,
-                comparator=Comparator.CUSTOM
+                comparator=Comparator.ALLCLOSE,
+                rtol=1e-4,
+                atol=1e-6
             ),
             lambda ctx: ctx.optimizer.state_dict()
         )
@@ -93,7 +95,7 @@ class TinyTransformerWorkload(Workload):
             StateContract(
                 name="scheduler",
                 scope=StateScope.REPLICATED,
-                comparator=Comparator.CUSTOM
+                comparator=Comparator.EXACT
             ),
             lambda ctx: ctx.scheduler.state_dict()
         )
@@ -105,4 +107,13 @@ class TinyTransformerWorkload(Workload):
                 comparator=Comparator.EXACT
             ),
             lambda ctx: ctx.global_step
+        )
+        
+        registry.register(
+            StateContract(
+                name="rng.torch_cpu",
+                scope=StateScope.REPLICATED,
+                comparator=Comparator.EXACT
+            ),
+            lambda ctx: torch.get_rng_state()
         )

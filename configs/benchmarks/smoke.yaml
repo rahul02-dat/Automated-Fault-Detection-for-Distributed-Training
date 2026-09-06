@@ -1,0 +1,9 @@
+benchmark_id: smoke_benchmark
+world_size: 2
+baseline_config: configs/smoke/ema_fixed.yaml
+faults:
+  - configs/faults/scheduler.yaml
+  - configs/faults/rng.yaml
+  - configs/faults/dataloader.yaml
+  - configs/faults/optimizer.yaml
+  - configs/smoke/ema_buggy.yaml

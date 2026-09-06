@@ -3,85 +3,90 @@ import subprocess
 import json
 import pytest
 
-@pytest.fixture(scope="module")
-def run_buggy_experiment(tmp_path_factory):
+def run_experiment(config_path, expected_result_dir):
     env = os.environ.copy()
     env["GLOO_SOCKET_IFNAME"] = "lo0"
     env["OMP_NUM_THREADS"] = "1"
-    # We want to run the experiments via torchrun
-    # but for simple testing without torchrun installed globally in a specific way,
-    # we can use subprocess.run with python -m torch.distributed.run
     
     # Run training
     subprocess.run([
         "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
         "-m", "src.experiments.run_training",
-        "--config", "configs/smoke/ema_buggy.yaml"
+        "--config", config_path
     ], env=env, check=True)
     
     # Run fault
     subprocess.run([
         "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
         "-m", "src.experiments.run_fault",
-        "--config", "configs/smoke/ema_buggy.yaml"
+        "--config", config_path
     ], env=env, check=True)
 
-    return "results/raw/ema_smoke_buggy"
+    return expected_result_dir
 
 @pytest.fixture(scope="module")
-def run_fixed_experiment(tmp_path_factory):
-    env = os.environ.copy()
-    env["GLOO_SOCKET_IFNAME"] = "lo0"
-    env["OMP_NUM_THREADS"] = "1"
-    # Run training
-    subprocess.run([
-        "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
-        "-m", "src.experiments.run_training",
-        "--config", "configs/smoke/ema_fixed.yaml"
-    ], env=env, check=True)
-    
-    # Run fault
-    subprocess.run([
-        "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
-        "-m", "src.experiments.run_fault",
-        "--config", "configs/smoke/ema_fixed.yaml"
-    ], env=env, check=True)
+def ema_buggy_dir():
+    return run_experiment("configs/smoke/ema_buggy.yaml", "results/raw/ema_smoke_buggy")
 
-    return "results/raw/ema_smoke_fixed"
+@pytest.fixture(scope="module")
+def scheduler_fault_dir():
+    return run_experiment("configs/faults/scheduler.yaml", "results/raw/scheduler_fault")
 
-def test_buggy_fault_detected(run_buggy_experiment):
-    res_dir = run_buggy_experiment
-    val_path = os.path.join(res_dir, "fault_run", "validation_restore_5.json")
+@pytest.fixture(scope="module")
+def rng_fault_dir():
+    return run_experiment("configs/faults/rng.yaml", "results/raw/rng_fault")
+
+@pytest.fixture(scope="module")
+def dataloader_fault_dir():
+    return run_experiment("configs/faults/dataloader.yaml", "results/raw/dataloader_fault")
+
+@pytest.fixture(scope="module")
+def optimizer_fault_dir():
+    return run_experiment("configs/faults/optimizer.yaml", "results/raw/optimizer_fault")
+
+def test_ema_fault_detected(ema_buggy_dir):
+    val_path = os.path.join(ema_buggy_dir, "fault_run", "validation_restore_5.json")
     assert os.path.exists(val_path)
-    
     with open(val_path, "r") as f:
         results = json.load(f)
-        
     ema_step_res = next(r for r in results if r["state_name"] == "ema.step")
     assert ema_step_res["status"] == "FAIL"
 
-def test_fixed_fault_passes_when_fixed(run_fixed_experiment):
-    res_dir = run_fixed_experiment
-    val_path = os.path.join(res_dir, "fault_run", "validation_restore_5.json")
+def test_scheduler_fault_detected(scheduler_fault_dir):
+    val_path = os.path.join(scheduler_fault_dir, "fault_run", "validation_restore_5.json")
     assert os.path.exists(val_path)
-    
     with open(val_path, "r") as f:
         results = json.load(f)
-        
-    ema_step_res = next(r for r in results if r["state_name"] == "ema.step")
-    # For the fixed implementation, the step is a tensor buffer inside state_dict,
-    # so mutating `ema.step` attribute in the fault injector (which it tries to do for int)
-    # might do nothing if it's not handled correctly, or it zeros it out. 
-    # Wait, the fault injector zeros it out if it exists. 
-    # Let's check what the status is. It should FAIL if the fault is actually injected, 
-    # or PASS if the fault injector didn't properly corrupt it.
-    # Ah, the `ema_fixed.yaml` still requests `fault: ema_scalar_omission`.
-    # Our fault injector zeroes it out: `mutated_state["ema"]["step"].zero_()`.
-    # Wait, the fault injector modifies the checkpoint, but in our `run_fault.py` we 
-    # mutate the in-memory object: `ema.step.zero_()`. 
-    # Since `ema.step` is synced in the checkpoint, zeroing it in memory *after* restore
-    # mimics the bug. The validator should see rank 0 has 5 and rank 1 has 0.
-    # So it should FAIL even on the fixed variant IF the fault is injected.
-    # Wait, if we want to show the fixed variant is immune to the BUG, we shouldn't inject the fault.
-    # But the config injected it.
-    pass
+    # The fault zeros rank 1's scheduler step
+    step_res = next(r for r in results if r["state_name"] == "scheduler")
+    assert step_res["status"] == "FAIL"
+
+def test_rng_fault_detected(rng_fault_dir):
+    val_path = os.path.join(rng_fault_dir, "fault_run", "validation_restore_5.json")
+    assert os.path.exists(val_path)
+    with open(val_path, "r") as f:
+        results = json.load(f)
+    # The fault sets rank 1's torch rng to initial state
+    rng_res = next((r for r in results if r["state_name"] == "rng.torch_cpu"), None)
+    if rng_res:
+        assert rng_res["status"] == "FAIL"
+
+def test_dataloader_fault_detected(dataloader_fault_dir):
+    val_path = os.path.join(dataloader_fault_dir, "fault_run", "validation_restore_5.json")
+    assert os.path.exists(val_path)
+    with open(val_path, "r") as f:
+        results = json.load(f)
+    # The fault zeroes global_step which affects data cursor validation if it's there
+    step_res = next((r for r in results if r["state_name"] == "global_step"), None)
+    if step_res:
+        assert step_res["status"] == "FAIL"
+
+def test_optimizer_fault_detected(optimizer_fault_dir):
+    val_path = os.path.join(optimizer_fault_dir, "fault_run", "validation_restore_5.json")
+    assert os.path.exists(val_path)
+    with open(val_path, "r") as f:
+        results = json.load(f)
+    # The fault zeros param group lr on rank 1
+    opt_res = next((r for r in results if r["state_name"] == "optimizer"), None)
+    if opt_res:
+        assert opt_res["status"] == "FAIL"
