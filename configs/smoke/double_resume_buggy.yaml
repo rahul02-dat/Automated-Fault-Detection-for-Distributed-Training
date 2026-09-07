@@ -1,0 +1,14 @@
+experiment_id: ema_double_resume_buggy
+workload:
+  name: tiny_transformer
+  config:
+    variant: buggy
+distributed:
+  world_size: 4
+  backend: gloo
+training:
+  seed: 0
+  total_steps: 12
+  checkpoint_steps: [4, 8]
+  resume_steps: [4, 8]
+fault: ema_scalar_omission
