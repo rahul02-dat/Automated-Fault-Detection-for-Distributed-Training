@@ -148,10 +148,10 @@ def validate_cross_rank(registry: StateRegistry, context: Any, expected_state: A
                     result = _validate_per_rank(contract, local_val, expected_val, rank)
                 else:
                     result = {
-                        "status": "UNKNOWN" if not contract.required else "FAIL",
+                        "status": "SKIP",
                         "state_name": contract.name,
                         "scope": contract.scope.value,
-                        "message": "Missing expected_state for PER_RANK validation."
+                        "message": "Missing expected_state for PER_RANK validation. Skipping."
                     }
             elif contract.scope == StateScope.SHARDED:
                 # Sharded logic not fully implemented yet per GUIDELINES

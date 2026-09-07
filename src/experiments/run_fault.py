@@ -33,8 +33,8 @@ def main():
     init_process_group(config.get("distributed", {}).get("backend", "gloo"))
     rank = get_rank()
 
-    fault_name = config.get("fault")
-    if not fault_name or fault_name not in FAULTS:
+    fault_name = config.get("fault", "none")
+    if fault_name != "none" and fault_name not in FAULTS:
         raise ValueError(f"Unknown fault: {fault_name}")
 
     out_dir = config.get("output_dir", f"results/raw/{config.get('experiment_id', 'run')}")
@@ -56,8 +56,9 @@ def main():
     state = torch.load(state_file, weights_only=False)
 
     # 2. Inject the fault offline
-    fault_injector = FAULTS[fault_name]()
-    state = fault_injector.apply(state)
+    if fault_name != "none":
+        fault_injector = FAULTS[fault_name]()
+        state = fault_injector.apply(state)
     
     # 3. Save the mutated payload
     out_state_file = os.path.join(mutated_ckpt_dir, f"state_rank{rank}.pt")

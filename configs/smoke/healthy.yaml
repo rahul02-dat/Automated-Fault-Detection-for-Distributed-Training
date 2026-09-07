@@ -1,4 +1,4 @@
-experiment_id: ema_smoke_fixed
+experiment_id: healthy_smoke
 workload:
   name: tiny_transformer
   config:
@@ -7,7 +7,7 @@ distributed:
   world_size: 2
   backend: gloo
 training:
-  seed: 0
+  seed: 42
   total_steps: 10
   checkpoint_steps: [5]
   resume_steps: [5]

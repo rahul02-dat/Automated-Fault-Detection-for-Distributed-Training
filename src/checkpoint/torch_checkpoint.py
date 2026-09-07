@@ -87,6 +87,12 @@ class TorchCheckpointBackend(CheckpointBackend):
         # like step counters we might need weights_only=False or to load them securely.
         save_dict = torch.load(os.path.join(path, f"state_rank{rank}.pt"), weights_only=False)
         
+        # Validate manifest vs payload
+        manifest_items = set(manifest.state_items)
+        payload_items = set(save_dict.keys())
+        if manifest_items != payload_items:
+            raise ValueError(f"Manifest schema validation error. Manifest describes {manifest_items}, but payload has {payload_items}.")
+        
         for key, saved_val in save_dict.items():
             if key in context:
                 obj = context[key]

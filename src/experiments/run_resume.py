@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--ckpt-path", required=False, help="Path to checkpoint to resume from")
+    parser.add_argument("--strict", action="store_true", help="Exit with non-zero status if validation fails")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -83,6 +84,12 @@ def main():
         val_path = os.path.join(resume_dir, f"validation_restore_{resume_step}.json")
         with open(val_path, "w") as f:
             json.dump(validation_results, f, indent=2)
+
+    if args.strict:
+        has_failure = any(res.get("status") == "FAIL" for res in validation_results)
+        if has_failure:
+            cleanup()
+            raise RuntimeError("Validation failed in strict mode.")
 
     # 3. Train the remaining steps
     total_steps = config.get("training", {}).get("total_steps", 100)
