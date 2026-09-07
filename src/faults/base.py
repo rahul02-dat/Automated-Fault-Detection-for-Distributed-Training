@@ -13,10 +13,10 @@ class FaultInjector(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Applies the fault to the given state dict or context.
-        Returns the mutated state.
+        Applies the fault directly to the loaded checkpoint payload dict.
+        Returns the mutated state payload.
         """
         pass
 

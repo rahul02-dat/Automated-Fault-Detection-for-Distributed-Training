@@ -52,33 +52,41 @@ def test_canonicalize():
 
 def test_compare_exact():
     # Scalars
-    match, _ = compare_exact(1, 1)
-    assert match
-    match, _ = compare_exact(1, 2)
-    assert not match
+    res = compare_exact(1, 1)
+    assert res["match"]
+    
+    res = compare_exact(1, 2)
+    assert not res["match"]
+    assert "Value mismatch" in res["reason"]
     
     # Tensors
-    t1 = torch.ones(2)
-    t2 = torch.ones(2)
-    match, _ = compare_exact(t1, t2)
-    assert match
+    t1 = torch.ones(2, 2)
+    res = compare_exact(t1, t1.clone())
+    assert res["match"]
     
-    t3 = torch.zeros(2)
-    match, _ = compare_exact(t1, t3)
-    assert not match
+    t2 = t1.clone()
+    t2[0, 0] = 0.0
+    res = compare_exact(t1, t2)
+    assert not res["match"]
+    assert "Tensor values mismatch" in res["reason"]
     
     # Dicts
-    d1 = {"a": t1, "b": 1}
-    d2 = {"a": t2, "b": 1}
-    match, _ = compare_exact(d1, d2)
-    assert match
+    d1 = {"a": 1, "b": t1}
+    d2 = {"a": 1, "b": t1.clone()}
+    res = compare_exact(d1, d2)
+    assert res["match"]
     
+    d3 = {"a": 2, "b": t1}
+    res = compare_exact(d1, d3)
+    assert not res["match"]
+
 def test_compare_allclose():
     t1 = torch.ones(2)
     t2 = torch.ones(2) + 1e-4
     
-    match, _ = compare_allclose(t1, t2, rtol=1e-3, atol=1e-3)
-    assert match
+    res = compare_allclose(t1, t2, rtol=1e-3, atol=1e-3)
+    assert res["match"]
     
-    match, _ = compare_allclose(t1, t2, rtol=1e-5, atol=1e-5)
-    assert not match
+    res = compare_allclose(t1, t2, rtol=1e-5, atol=1e-5)
+    assert not res["match"]
+    assert "Tensor allclose mismatch" in res["reason"]

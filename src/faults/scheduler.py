@@ -14,19 +14,17 @@ class SchedulerStaleStateFault(FaultInjector):
     def name(self) -> str:
         return "scheduler_stale_state"
 
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         # Mutate the scheduler in place if we can, or modify state dict.
         # In our experiments, we instantiate objects and apply faults.
         rank = dist.get_rank()
         if rank > 0:
-            if "scheduler" in context:
-                sched = context["scheduler"]
-                if hasattr(sched, "last_epoch"):
-                    sched.last_epoch = 0
-                if hasattr(sched, "step_num"):
-                    sched.step_num = 0
-                if hasattr(sched, "_step_count"):
-                    sched._step_count = 1
+            if "scheduler" in state:
+                sched = state["scheduler"]
+                if "last_epoch" in sched:
+                    sched["last_epoch"] = 0
+                if "_step_count" in sched:
+                    sched["_step_count"] = 1
         return state
 
     def metadata(self) -> Dict[str, Any]:

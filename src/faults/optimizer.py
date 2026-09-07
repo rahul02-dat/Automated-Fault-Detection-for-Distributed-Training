@@ -12,16 +12,14 @@ class OptimizerStateCorruptionFault(FaultInjector):
     def name(self) -> str:
         return "optimizer_state_corruption"
 
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         rank = dist.get_rank()
         if rank > 0:
-            if isinstance(context, dict) and "optimizer" in context:
-                opt = context["optimizer"]
-                for param_state in opt.state.values():
-                    if "momentum_buffer" in param_state:
-                        # Zero out momentum buffer
-                        param_state["momentum_buffer"].zero_()
-                        break
+            if isinstance(state, dict) and "optimizer" in state:
+                opt = state["optimizer"]
+                if "param_groups" in opt:
+                    for group in opt["param_groups"]:
+                        group["lr"] = 0.0
         return state
 
     def metadata(self) -> Dict[str, Any]:

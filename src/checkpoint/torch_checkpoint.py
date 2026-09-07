@@ -34,11 +34,20 @@ class TorchCheckpointBackend(CheckpointBackend):
         rank = dist.get_rank()
         world_size = dist.get_world_size()
         
+        # Don't import at module level to avoid circular imports if any
+        from ..runtime.environment import collect_environment
+        
         state_items = []
         save_dict = {}
         
-        # Build the save_dict by calling state_dict() on objects that have it
+        # We should NOT checkpoint execution metadata like 'rank' and 'world_size'
+        # into the payload. The payload should only be true logical state.
+        exclude_keys = {"rank", "world_size"}
+        
         for key, obj in context.items():
+            if key in exclude_keys:
+                continue
+                
             state_items.append(key)
             if hasattr(obj, "state_dict"):
                 save_dict[key] = obj.state_dict()
@@ -47,6 +56,8 @@ class TorchCheckpointBackend(CheckpointBackend):
                 
         torch.save(save_dict, os.path.join(path, f"state_rank{rank}.pt"))
         
+        env_meta = collect_environment()
+        
         manifest = CheckpointManifest(
             format_version=1,
             experiment_id=self.experiment_id,
@@ -54,13 +65,14 @@ class TorchCheckpointBackend(CheckpointBackend):
             global_step=context.get("global_step", 0),
             world_size=world_size,
             rank=rank,
-            backend="gloo", # Hardcoded for now, can be parameterized
+            backend=dist.dist.get_backend() if dist.is_initialized() else "unknown",
             seed=self.seed,
             workload=self.workload_name,
             state_items=state_items,
             created_at=datetime.datetime.utcnow().isoformat() + "Z",
-            git_sha=None,
-            config_hash=None
+            git_sha=env_meta.get("git_sha"),
+            config_hash=None,
+            environment=env_meta
         )
         
         manifest.save(os.path.join(path, f"manifest_rank{rank}.json"))

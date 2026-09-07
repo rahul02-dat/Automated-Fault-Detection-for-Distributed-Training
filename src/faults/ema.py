@@ -13,18 +13,20 @@ class EMAScalarOmissionFault(FaultInjector):
     def name(self) -> str:
         return "ema_scalar_omission"
 
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         from src.runtime import distributed as dist
         rank = dist.get_rank()
         
+        # Only inject fault on ranks > 0
         if rank > 0:
-            if isinstance(context, dict) and "ema" in context:
-                ema = context["ema"]
-                if hasattr(ema, "step"):
-                    if isinstance(ema.step, int):
-                        ema.step = 0
-                    else:
-                        ema.step.zero_()
+            if "ema" in state:
+                ema_state = state["ema"]
+                if "step" in ema_state:
+                    import torch
+                    if isinstance(ema_state["step"], int):
+                        ema_state["step"] = 0
+                    elif isinstance(ema_state["step"], torch.Tensor):
+                        ema_state["step"].zero_()
                 
         return state
 

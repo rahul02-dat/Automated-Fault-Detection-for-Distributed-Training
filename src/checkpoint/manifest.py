@@ -1,7 +1,7 @@
 import json
 import os
 from dataclasses import dataclass, asdict
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 @dataclass
 class CheckpointManifest:
@@ -19,6 +19,7 @@ class CheckpointManifest:
     created_at: str
     git_sha: Optional[str] = None
     config_hash: Optional[str] = None
+    environment: Optional[Dict[str, Any]] = None
 
     def save(self, path: str):
         """Save the manifest to a JSON file."""

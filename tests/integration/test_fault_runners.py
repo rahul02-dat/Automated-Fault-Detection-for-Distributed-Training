@@ -15,14 +15,31 @@ def run_experiment(config_path, expected_result_dir):
         "--config", config_path
     ], env=env, check=True)
     
-    # Run fault
+    # Run fault (offline mutation)
     subprocess.run([
         "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
         "-m", "src.experiments.run_fault",
         "--config", config_path
     ], env=env, check=True)
 
-    return expected_result_dir
+    # We need the fault name to construct the path. Let's just pass the mutated ckpt to run_resume
+    import yaml
+    with open(config_path, "r") as f:
+        cfg = yaml.safe_load(f)
+    fault_name = cfg["fault"]
+    resume_step = cfg.get("training", {}).get("resume_steps", [0])[0]
+    
+    ckpt_path = os.path.join(expected_result_dir, f"checkpoint_{resume_step}_mutated_{fault_name}")
+    
+    # Run resume
+    subprocess.run([
+        "torchrun", "--rdzv_endpoint=localhost:29500", "--nproc_per_node=2",
+        "-m", "src.experiments.run_resume",
+        "--config", config_path,
+        "--ckpt-path", ckpt_path
+    ], env=env, check=True)
+    
+    return os.path.join(expected_result_dir, "resume")
 
 @pytest.fixture(scope="module")
 def ema_buggy_dir():
@@ -45,15 +62,28 @@ def optimizer_fault_dir():
     return run_experiment("configs/faults/optimizer.yaml", "results/raw/optimizer_fault")
 
 def test_ema_fault_detected(ema_buggy_dir):
-    val_path = os.path.join(ema_buggy_dir, "fault_run", "validation_restore_5.json")
+    # In EMABuggy, the step is not saved/loaded, so all ranks load step=0
+    # Thus, cross-rank validation PASSES because they are consistently wrong.
+    val_path = os.path.join(ema_buggy_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)
     ema_step_res = next(r for r in results if r["state_name"] == "ema.step")
-    assert ema_step_res["status"] == "FAIL"
+    assert ema_step_res["status"] == "PASS"
+    
+    # But the eval loss should diverge from the baseline (uninterrupted run)
+    baseline_eval_path = os.path.join(os.path.dirname(ema_buggy_dir), "eval_final.json")
+    resume_eval_path = os.path.join(ema_buggy_dir, "eval_final_10.json")
+    
+    with open(baseline_eval_path, "r") as f:
+        baseline_loss = json.load(f)["loss"]
+    with open(resume_eval_path, "r") as f:
+        resume_loss = json.load(f)["loss"]
+        
+    assert baseline_loss != resume_loss
 
 def test_scheduler_fault_detected(scheduler_fault_dir):
-    val_path = os.path.join(scheduler_fault_dir, "fault_run", "validation_restore_5.json")
+    val_path = os.path.join(scheduler_fault_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)
@@ -62,7 +92,7 @@ def test_scheduler_fault_detected(scheduler_fault_dir):
     assert step_res["status"] == "FAIL"
 
 def test_rng_fault_detected(rng_fault_dir):
-    val_path = os.path.join(rng_fault_dir, "fault_run", "validation_restore_5.json")
+    val_path = os.path.join(rng_fault_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)
@@ -72,7 +102,7 @@ def test_rng_fault_detected(rng_fault_dir):
         assert rng_res["status"] == "FAIL"
 
 def test_dataloader_fault_detected(dataloader_fault_dir):
-    val_path = os.path.join(dataloader_fault_dir, "fault_run", "validation_restore_5.json")
+    val_path = os.path.join(dataloader_fault_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)
@@ -82,7 +112,7 @@ def test_dataloader_fault_detected(dataloader_fault_dir):
         assert step_res["status"] == "FAIL"
 
 def test_optimizer_fault_detected(optimizer_fault_dir):
-    val_path = os.path.join(optimizer_fault_dir, "fault_run", "validation_restore_5.json")
+    val_path = os.path.join(optimizer_fault_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)

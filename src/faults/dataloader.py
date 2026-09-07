@@ -12,13 +12,11 @@ class DataCursorMismatchFault(FaultInjector):
     def name(self) -> str:
         return "data_cursor_mismatch"
 
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         rank = dist.get_rank()
         if rank > 0:
-            if isinstance(context, dict) and "global_step" in context:
-                context["global_step"] += 1
-            elif hasattr(context, "global_step"):
-                context.global_step += 1
+            if "global_step" in state:
+                state["global_step"] += 1
         return state
 
     def metadata(self) -> Dict[str, Any]:

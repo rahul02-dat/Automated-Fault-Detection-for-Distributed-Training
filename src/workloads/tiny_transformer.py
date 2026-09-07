@@ -43,10 +43,24 @@ class TinyTransformerWorkload(Workload):
         loss.backward()
         optimizer.step()
         ema.update(model)
+        # Advance scheduler if available in kwargs
+        if "scheduler" in kwargs and kwargs["scheduler"] is not None:
+            kwargs["scheduler"].step()
         return loss
 
-    def evaluate(self, *args, **kwargs) -> Any:
-        pass
+    def evaluate(self, model: Any, **kwargs) -> Any:
+        # A simple evaluation on a fixed batch to act as resume equivalence metric
+        x, y = get_batch(9999) # Fixed test batch
+        
+        # If ema is provided, evaluate the ema model to catch EMA divergence
+        eval_model = kwargs.get("ema", model)
+        if hasattr(eval_model, "module"):
+            eval_model = eval_model.module
+            
+        with torch.no_grad():
+            logits = eval_model(x)
+            loss = nn.functional.cross_entropy(logits.reshape(-1, logits.size(-1)), y.reshape(-1))
+        return loss.item()
 
     def register_state_contracts(self, registry: StateRegistry, context: Any) -> None:
         registry.register(
@@ -57,7 +71,7 @@ class TinyTransformerWorkload(Workload):
                 rtol=1e-4,
                 atol=1e-6
             ),
-            lambda ctx: ctx.model.state_dict()
+            lambda ctx: ctx["model"].state_dict()
         )
         
         registry.register(
@@ -68,7 +82,7 @@ class TinyTransformerWorkload(Workload):
                 rtol=1e-4,
                 atol=1e-6
             ),
-            lambda ctx: ctx.ema.state_dict() if hasattr(ctx.ema, 'state_dict') else None
+            lambda ctx: ctx["ema"].state_dict() if hasattr(ctx["ema"], 'state_dict') else None
         )
         
         registry.register(
@@ -77,7 +91,7 @@ class TinyTransformerWorkload(Workload):
                 scope=StateScope.GLOBAL,
                 comparator=Comparator.EXACT
             ),
-            lambda ctx: getattr(ctx.ema, 'step', 0) if isinstance(getattr(ctx.ema, 'step', 0), int) else getattr(ctx.ema, 'step', torch.tensor(0)).item()
+            lambda ctx: getattr(ctx["ema"], 'step', 0) if isinstance(getattr(ctx["ema"], 'step', 0), int) else getattr(ctx["ema"], 'step', torch.tensor(0)).item()
         )
         
         registry.register(
@@ -88,7 +102,7 @@ class TinyTransformerWorkload(Workload):
                 rtol=1e-4,
                 atol=1e-6
             ),
-            lambda ctx: ctx.optimizer.state_dict()
+            lambda ctx: ctx["optimizer"].state_dict()
         )
         
         registry.register(
@@ -97,7 +111,7 @@ class TinyTransformerWorkload(Workload):
                 scope=StateScope.REPLICATED,
                 comparator=Comparator.EXACT
             ),
-            lambda ctx: ctx.scheduler.state_dict()
+            lambda ctx: ctx["scheduler"].state_dict()
         )
         
         registry.register(
@@ -106,13 +120,13 @@ class TinyTransformerWorkload(Workload):
                 scope=StateScope.GLOBAL,
                 comparator=Comparator.EXACT
             ),
-            lambda ctx: ctx.global_step
+            lambda ctx: ctx.get("global_step", 0)
         )
         
         registry.register(
             StateContract(
                 name="rng.torch_cpu",
-                scope=StateScope.REPLICATED,
+                scope=StateScope.PER_RANK,
                 comparator=Comparator.EXACT
             ),
             lambda ctx: torch.get_rng_state()

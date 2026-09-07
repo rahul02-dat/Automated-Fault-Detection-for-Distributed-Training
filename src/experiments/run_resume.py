@@ -6,11 +6,13 @@ from src.runtime.distributed import init_process_group, destroy_process_group as
 from src.runtime.seeds import set_deterministic_seeds
 from src.checkpoint.torch_checkpoint import TorchCheckpointBackend
 from src.workloads.tiny_transformer import TinyTransformerWorkload
-from src.workloads.tiny_transformer import TinyTransformerWorkload
+from src.validator.registry import StateRegistry
+from src.validator.validator import validate_cross_rank
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--ckpt-path", required=False, help="Path to checkpoint to resume from")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
@@ -24,8 +26,11 @@ def main():
     set_deterministic_seeds(seed, rank)
 
     out_dir = config.get("output_dir", f"results/raw/{config.get('experiment_id', 'run')}")
+    run_name = config.get("run_name", "resume")
+    resume_dir = os.path.join(out_dir, run_name)
+    
     if rank == 0:
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(resume_dir, exist_ok=True)
         
     workload_cfg = config.get("workload", {})
     if workload_cfg.get("name") == "tiny_transformer":
@@ -43,13 +48,10 @@ def main():
 
     ckpt_backend = TorchCheckpointBackend(
         experiment_id=config.get("experiment_id", "run"),
-        run_id="run_0",
+        run_id=run_name,
         workload_name=workload_cfg.get("name"),
         seed=seed
     )
-
-    total_steps = config.get("training", {}).get("total_steps", 100)
-    ckpt_steps = set(config.get("training", {}).get("checkpoint_steps", []))
     
     ctx = {
         "model": model,
@@ -61,39 +63,57 @@ def main():
         "world_size": world_size
     }
 
-    for step in range(total_steps):
-        workload.train_step(model=model, optimizer=optimizer, ema=ema, scheduler=scheduler, step=step)
-        
-        # global_step invariant: number of completed optimizer updates
-        ctx["global_step"] = step + 1
-        
-        # Checkpointing at specific boundaries.
-        if (step + 1) in ckpt_steps:
-            ckpt_path = os.path.join(out_dir, f"checkpoint_{step + 1}")
-            ckpt_backend.save(ctx, ckpt_path)
-
-    # Save final reference
-    ctx["global_step"] = total_steps
-    final_path = os.path.join(out_dir, "checkpoint_final")
-    ckpt_backend.save(ctx, final_path)
-
-    # Final validation and eval
-    from src.validator.registry import StateRegistry
-    from src.validator.validator import validate_cross_rank
+    # Decide which checkpoint to load
+    ckpt_path = args.ckpt_path or config.get("resume_ckpt_path")
+    if not ckpt_path:
+        resume_step = config.get("training", {}).get("resume_steps", [0])[0]
+        ckpt_path = os.path.join(out_dir, f"checkpoint_{resume_step}")
     
+    # 1. Load the checkpoint
+    manifest = ckpt_backend.load(ctx, ckpt_path)
+    resume_step = ctx.get("global_step", 0)
+    
+    # 2. Validate state immediately upon restore
     registry = StateRegistry()
     workload.register_state_contracts(registry, ctx)
-    final_results = validate_cross_rank(registry, ctx)
     
+    # Expected state from baseline can be passed if we want strictly EXACT checks against baseline
+    validation_results = validate_cross_rank(registry, ctx)
     if rank == 0:
-        final_val_path = os.path.join(out_dir, f"validation_final_{total_steps}.json")
+        val_path = os.path.join(resume_dir, f"validation_restore_{resume_step}.json")
+        with open(val_path, "w") as f:
+            json.dump(validation_results, f, indent=2)
+
+    # 3. Train the remaining steps
+    total_steps = config.get("training", {}).get("total_steps", 100)
+    ckpt_steps = set(config.get("training", {}).get("checkpoint_steps", []))
+
+    for step in range(resume_step, total_steps):
+        workload.train_step(model=model, optimizer=optimizer, ema=ema, scheduler=scheduler, step=step)
+        ctx["global_step"] = step + 1
+        
+        # Checkpointing
+        if (step + 1) in ckpt_steps:
+            new_ckpt_path = os.path.join(resume_dir, f"checkpoint_{step + 1}")
+            ckpt_backend.save(ctx, new_ckpt_path)
+
+    # Validate at the end
+    final_results = validate_cross_rank(registry, ctx)
+    if rank == 0:
+        final_val_path = os.path.join(resume_dir, f"validation_final_{total_steps}.json")
         with open(final_val_path, "w") as f:
             json.dump(final_results, f, indent=2)
             
+        # Also compute standard evaluation and save it
         eval_metric = workload.evaluate(model, ema=ema)
-        eval_path = os.path.join(out_dir, "eval_final.json")
+        eval_path = os.path.join(resume_dir, f"eval_final_{total_steps}.json")
         with open(eval_path, "w") as f:
             json.dump({"loss": eval_metric}, f, indent=2)
+            
+    # Save final reference
+    ctx["global_step"] = total_steps
+    final_path = os.path.join(resume_dir, "checkpoint_final")
+    ckpt_backend.save(ctx, final_path)
 
     cleanup()
 

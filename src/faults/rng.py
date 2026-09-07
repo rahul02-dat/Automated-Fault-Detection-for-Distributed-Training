@@ -13,7 +13,7 @@ class RNGStateOmissionFault(FaultInjector):
     def name(self) -> str:
         return "rng_state_omission"
 
-    def apply(self, state: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         # Perturb the RNG state so it doesn't match the resumed state
         torch.manual_seed(9999 + dist.get_rank())
         random.seed(9999 + dist.get_rank())
