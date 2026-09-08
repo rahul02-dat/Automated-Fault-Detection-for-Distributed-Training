@@ -90,11 +90,11 @@ def main():
     
     # 1. Load the checkpoint
     manifest = ckpt_backend.load(ctx, ckpt_path)
-    resume_step = ctx.get("global_step", 0)
+    resume_step_for_data = ctx.get("global_step", 0)
     
     # Fast-forward dataloader if needed (simplified for testing)
-    if data_iter is not None and resume_step > 0:
-        for _ in range(resume_step):
+    if data_iter is not None and resume_step_for_data > 0:
+        for _ in range(resume_step_for_data):
             try:
                 next(data_iter)
             except StopIteration:
@@ -106,8 +106,10 @@ def main():
     workload.register_state_contracts(registry, ctx)
     
     validation_results = validate_cross_rank(registry, ctx)
+    
+    loop_start = config.get("training", {}).get("resume_steps", [0])[0]
     if rank == 0:
-        val_path = os.path.join(resume_dir, f"validation_restore_{resume_step}.json")
+        val_path = os.path.join(resume_dir, f"validation_restore_{loop_start}.json")
         with open(val_path, "w") as f:
             json.dump(validation_results, f, indent=2)
 
@@ -121,7 +123,7 @@ def main():
     total_steps = config.get("training", {}).get("total_steps", 100)
     ckpt_steps = set(config.get("training", {}).get("checkpoint_steps", []))
 
-    for step in range(resume_step, total_steps):
+    for step in range(loop_start, total_steps):
         kwargs = {"model": model, "optimizer": optimizer, "scheduler": scheduler, "step": step}
         if ema is not None:
             kwargs["ema"] = ema
