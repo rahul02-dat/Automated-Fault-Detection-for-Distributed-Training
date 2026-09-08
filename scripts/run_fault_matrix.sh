@@ -1,34 +1,49 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-echo "Running Full Fault Matrix..."
+# Run the complete fault matrix
+
+WORKLOADS=("tiny_transformer" "resnet" "small_transformer")
+FAULTS=("ema_scalar_omission" "scheduler_stale_state" "rng_omission" "data_cursor_mismatch" "optimizer_state_corruption")
 
 export GLOO_SOCKET_IFNAME="lo0"
 export OMP_NUM_THREADS="1"
 
-source .venv/bin/activate
+echo "=============================================="
+echo "Starting Full Fault Matrix"
+echo "=============================================="
 
-echo "Running baseline to generate checkpoints for faults..."
-torchrun --rdzv_endpoint=localhost:29500 --nproc_per_node=2 -m src.experiments.run_training --config configs/smoke/ema_fixed.yaml
+for WORKLOAD in "${WORKLOADS[@]}"; do
+    CONFIG="configs/benchmarks/${WORKLOAD}_smoke.yaml"
+    if [ ! -f "$CONFIG" ]; then
+        if [ "$WORKLOAD" == "tiny_transformer" ]; then
+            CONFIG="configs/smoke/ema_fixed.yaml"
+        else
+            echo "Skipping $WORKLOAD: Config not found."
+            continue
+        fi
+    fi
 
-for config in configs/faults/*.yaml; do
-    echo "Running fault injection with config: $config"
-    # Offline mutation
-    torchrun --rdzv_endpoint=localhost:29500 --nproc_per_node=2 -m src.experiments.run_fault --config "$config"
-    
-    # Extract the fault name and out dir from the yaml
-    FAULT_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$config'))['fault'])")
-    RESUME_STEP=$(python -c "import yaml; print(yaml.safe_load(open('$config'))['training']['resume_steps'][0])")
-    EXP_ID=$(python -c "import yaml; print(yaml.safe_load(open('$config')).get('experiment_id', 'run'))")
-    OUT_DIR=$(python -c "import yaml; print(yaml.safe_load(open('$config')).get('output_dir', f'results/raw/{EXP_ID}'))")
-    
-    echo "Mutated checkpoint for $FAULT_NAME created."
-    
-    # Now run resume
-    CKPT_PATH="${OUT_DIR}/checkpoint_${RESUME_STEP}_mutated_${FAULT_NAME}"
-    echo "Resuming from mutated checkpoint: $CKPT_PATH"
-    
-    torchrun --rdzv_endpoint=localhost:29500 --nproc_per_node=2 -m src.experiments.run_resume --config "$config" --ckpt-path "$CKPT_PATH"
+    echo "Running baseline for $WORKLOAD..."
+    uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_training --config $CONFIG
+
+    for FAULT in "${FAULTS[@]}"; do
+        echo "----------------------------------------------"
+        echo "Testing Fault: $FAULT on Workload: $WORKLOAD"
+        echo "----------------------------------------------"
+        
+        # We need a temporary config with the fault injected
+        TMP_CONFIG="/tmp/matrix_config_$$.yaml"
+        sed "s/fault: none/fault: $FAULT/" $CONFIG > $TMP_CONFIG
+        
+        # Inject the fault into the baseline checkpoint
+        uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_fault --config $TMP_CONFIG
+        
+        # Resume and validate (we don't exit on strict here so we can finish the matrix)
+        uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_resume --config $TMP_CONFIG || true
+        
+        rm $TMP_CONFIG
+    done
 done
 
-echo "Fault Matrix Completed!"
+echo "Matrix complete!"

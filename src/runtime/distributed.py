@@ -58,3 +58,11 @@ def broadcast_object(obj, src=0):
     obj_list = [obj]
     dist.broadcast_object_list(obj_list, src=src)
     return obj_list[0]
+
+def all_reduce(tensor, op=dist.ReduceOp.SUM):
+    """
+    All-reduce a tensor.
+    """
+    if not is_initialized():
+        return
+    dist.all_reduce(tensor, op=op)

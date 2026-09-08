@@ -1,0 +1,18 @@
+experiment_id: resnet_smoke
+workload:
+  name: resnet
+  config:
+    batch_size: 16
+    lr: 0.01
+
+distributed:
+  world_size: 2
+  backend: gloo
+
+training:
+  seed: 42
+  total_steps: 10
+  checkpoint_steps: [5]
+  resume_steps: [5]
+
+fault: none

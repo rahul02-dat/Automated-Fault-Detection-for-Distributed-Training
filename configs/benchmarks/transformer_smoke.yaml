@@ -1,0 +1,21 @@
+experiment_id: transformer_smoke
+workload:
+  name: small_transformer
+  config:
+    batch_size: 8
+    lr: 0.0005
+    n_layer: 2
+    n_head: 4
+    n_embd: 128
+
+distributed:
+  world_size: 2
+  backend: gloo
+
+training:
+  seed: 42
+  total_steps: 10
+  checkpoint_steps: [5]
+  resume_steps: [5]
+
+fault: none

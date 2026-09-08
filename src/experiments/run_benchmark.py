@@ -2,115 +2,139 @@ import argparse
 import os
 import yaml
 import json
-import subprocess
 import time
-from pathlib import Path
-
-def run_subprocess(cmd, env=None):
-    env = os.environ.copy() if env is None else env
-    env["GLOO_SOCKET_IFNAME"] = "lo0"
-    env["OMP_NUM_THREADS"] = "1"
-    
-    start_time = time.time()
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
-    duration = time.time() - start_time
-    return result, duration
+from src.runtime.distributed import init_process_group, destroy_process_group as cleanup, get_rank, get_world_size
+from src.runtime.seeds import set_deterministic_seeds
+from src.checkpoint.torch_checkpoint import TorchCheckpointBackend
+from src.workloads import TinyTransformerWorkload, ResNetWorkload, SmallTransformerWorkload
+from src.validator.registry import StateRegistry
+from src.validator.validator import validate_cross_rank
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--disable-validation", action="store_true", help="Run without cross-rank validation to measure baseline overhead.")
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
 
-    print(f"Running benchmark suite from {args.config}")
+    init_process_group(config.get("distributed", {}).get("backend", "gloo"))
+    rank = get_rank()
+    world_size = get_world_size()
+
+    seed = config.get("training", {}).get("seed", 0)
+    set_deterministic_seeds(seed, rank)
+
+    out_dir = config.get("output_dir", f"results/benchmarks/{config.get('experiment_id', 'run')}")
+    if rank == 0:
+        os.makedirs(out_dir, exist_ok=True)
+        
+    workload_cfg = config.get("workload", {})
+    workload_name = workload_cfg.get("name")
     
-    benchmark_id = config.get("benchmark_id", "bench_run")
-    out_dir = f"results/processed/{benchmark_id}"
-    os.makedirs(out_dir, exist_ok=True)
+    if workload_name == "tiny_transformer":
+        workload = TinyTransformerWorkload(seed=seed, variant=workload_cfg.get("config", {}).get("variant", "fixed"))
+    elif workload_name == "resnet":
+        workload = ResNetWorkload(config=workload_cfg.get("config", {}))
+    elif workload_name == "small_transformer":
+        workload = SmallTransformerWorkload(config=workload_cfg.get("config", {}))
+    else:
+        raise ValueError(f"Unknown workload: {workload_name}")
+
+    model = workload.build_model()
+    ema = workload.build_ema(model) if hasattr(workload, "build_ema") else None
+    optimizer = workload.build_optimizer(model)
+    scheduler = workload.build_scheduler(optimizer)
+
+    ckpt_backend = TorchCheckpointBackend(
+        experiment_id=config.get("experiment_id", "run"),
+        run_id="bench_0",
+        workload_name=workload_name,
+        seed=seed
+    )
+
+    total_steps = config.get("training", {}).get("total_steps", 100)
+    ckpt_steps = set(config.get("training", {}).get("checkpoint_steps", []))
     
-    report = {
-        "benchmark_id": benchmark_id,
-        "results": []
+    ctx = {
+        "model": model,
+        "optimizer": optimizer,
+        "scheduler": scheduler,
+        "global_step": 0,
+        "rank": rank,
+        "world_size": world_size
+    }
+    if ema is not None:
+        ctx["ema"] = ema
+
+    # Setup dataloader if available
+    data_res = workload.build_data()
+    if data_res is not None:
+        if isinstance(data_res, tuple):
+            dataloader, sampler = data_res
+        else:
+            dataloader = data_res
+        data_iter = iter(dataloader)
+    else:
+        data_iter = None
+
+    metrics = {
+        "runtime": 0.0,
+        "checkpoint_time": 0.0,
+        "validation_time": 0.0,
+        "total_steps": total_steps,
+        "world_size": world_size,
+        "validation_enabled": not args.disable_validation
     }
 
-    world_size = config.get("world_size", 2)
-    faults = config.get("faults", [])
-    
-    # Run Baseline (healthy)
-    baseline_config_path = config.get("baseline_config", "configs/smoke/ema_fixed.yaml")
-    print(f"Running baseline training: {baseline_config_path}")
-    
-    cmd_train = [
-        "torchrun", 
-        "--rdzv_endpoint=localhost:29500", 
-        f"--nproc_per_node={world_size}", 
-        "-m", "src.experiments.run_training", 
-        "--config", baseline_config_path
-    ]
-    
-    res, baseline_dur = run_subprocess(cmd_train)
-    if res.returncode != 0:
-        print(f"Baseline training failed: {res.stderr}")
-        return
-        
-    print(f"Baseline completed in {baseline_dur:.2f}s")
+    start_time = time.time()
 
-    for fault_cfg_path in faults:
-        print(f"Running fault injection: {fault_cfg_path}")
-        cmd_fault = [
-            "torchrun", 
-            "--rdzv_endpoint=localhost:29500", 
-            f"--nproc_per_node={world_size}", 
-            "-m", "src.experiments.run_fault", 
-            "--config", fault_cfg_path
-        ]
-        
-        res, fault_dur = run_subprocess(cmd_fault)
-        
-        # We also need to extract validation results
-        with open(fault_cfg_path, "r") as f:
-            fault_cfg = yaml.safe_load(f)
+    for step in range(total_steps):
+        kwargs = {"model": model, "optimizer": optimizer, "scheduler": scheduler, "step": step}
+        if ema is not None:
+            kwargs["ema"] = ema
             
-        exp_id = fault_cfg.get("experiment_id", "run")
-        raw_dir = f"results/raw/{exp_id}/fault_run"
-        
-        # Find validation files
-        detected = False
-        val_ms = 0
-        
-        try:
-            val_files = [f for f in os.listdir(raw_dir) if f.startswith("validation_")]
-            for vf in val_files:
-                with open(os.path.join(raw_dir, vf), "r") as f:
-                    val_data = json.load(f)
-                    for item in val_data:
-                        val_ms += item.get("duration_ms", 0)
-                        if item.get("status") == "FAIL":
-                            detected = True
-        except Exception as e:
-            print(f"Failed to parse validation results for {fault_cfg_path}: {e}")
-            
-        overhead_pct = ((fault_dur - baseline_dur) / baseline_dur) * 100 if baseline_dur > 0 else 0
-        
-        fault_result = {
-            "config": fault_cfg_path,
-            "detected": detected,
-            "fault_dur_s": fault_dur,
-            "baseline_dur_s": baseline_dur,
-            "overhead_pct": overhead_pct,
-            "validation_ms": val_ms
-        }
-        report["results"].append(fault_result)
-        
-        print(f"  Detected: {detected} | Overhead: {overhead_pct:.2f}% | Val time: {val_ms:.2f}ms")
+        if data_iter is not None:
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(dataloader)
+                batch = next(data_iter)
+            kwargs["batch"] = batch
 
-    report_path = os.path.join(out_dir, "benchmark_report.json")
-    with open(report_path, "w") as f:
-        json.dump(report, f, indent=2)
+        workload.train_step(**kwargs)
+        ctx["global_step"] = step + 1
         
-    print(f"Benchmark completed. Report saved to {report_path}")
+        # Checkpointing
+        if (step + 1) in ckpt_steps:
+            t0 = time.time()
+            ckpt_path = os.path.join(out_dir, f"checkpoint_{step + 1}")
+            ckpt_backend.save(ctx, ckpt_path)
+            metrics["checkpoint_time"] += (time.time() - t0)
+
+    train_end_time = time.time()
+    metrics["runtime"] = train_end_time - start_time
+
+    # Final validation
+    if not args.disable_validation:
+        val_start_time = time.time()
+        registry = StateRegistry()
+        workload.register_state_contracts(registry, ctx)
+        final_results = validate_cross_rank(registry, ctx)
+        metrics["validation_time"] = time.time() - val_start_time
+        
+        if rank == 0:
+            final_val_path = os.path.join(out_dir, f"validation_final_{total_steps}.json")
+            with open(final_val_path, "w") as f:
+                json.dump(final_results, f, indent=2)
+
+    if rank == 0:
+        metrics_path = os.path.join(out_dir, f"benchmark_metrics_{'disabled' if args.disable_validation else 'enabled'}.json")
+        with open(metrics_path, "w") as f:
+            json.dump(metrics, f, indent=2)
+
+    cleanup()
 
 if __name__ == "__main__":
     main()
