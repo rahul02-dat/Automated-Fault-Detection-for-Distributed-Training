@@ -42,8 +42,14 @@ class ResNetWorkload(Workload):
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
         
-        # In a real environment, datasets should ideally be pre-downloaded
-        dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        # Ensure only rank 0 downloads the dataset to prevent race conditions
+        if dist.get_rank() == 0:
+            datasets.CIFAR10(root='./data', train=True, download=True)
+            
+        if dist.is_initialized():
+            dist.barrier()
+            
+        dataset = datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
         
         sampler = DistributedSampler(
             dataset,
