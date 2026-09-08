@@ -25,7 +25,7 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
     fi
 
     echo "Running baseline for $WORKLOAD..."
-    uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_training --config $CONFIG
+    uv run torchrun --rdzv_endpoint=127.0.0.1:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_training --config $CONFIG
 
     for FAULT in "${FAULTS[@]}"; do
         echo "----------------------------------------------"
@@ -37,10 +37,10 @@ for WORKLOAD in "${WORKLOADS[@]}"; do
         sed "s/fault: none/fault: $FAULT/" $CONFIG > $TMP_CONFIG
         
         # Inject the fault into the baseline checkpoint
-        uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_fault --config $TMP_CONFIG
+        uv run torchrun --rdzv_endpoint=127.0.0.1:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_fault --config $TMP_CONFIG
         
         # Resume and validate (we don't exit on strict here so we can finish the matrix)
-        uv run torchrun --rdzv_endpoint=localhost:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_resume --config $TMP_CONFIG || true
+        uv run torchrun --rdzv_endpoint=127.0.0.1:29500 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_resume --config $TMP_CONFIG || true
         
         rm $TMP_CONFIG
     done
