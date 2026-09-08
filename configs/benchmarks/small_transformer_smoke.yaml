@@ -1,4 +1,4 @@
-experiment_id: transformer_smoke
+experiment_id: small_transformer_smoke
 workload:
   name: small_transformer
   config:
