@@ -1,4 +1,4 @@
-# Multi-Process Validation Harness for Distributed Training
+# Automated Fault Detection for Distributed Checkpointing
 
 ## 1. About the Project
 
