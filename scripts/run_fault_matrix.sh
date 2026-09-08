@@ -8,6 +8,7 @@ FAULTS=("ema_scalar_omission" "scheduler_stale_state" "rng_omission" "data_curso
 
 export GLOO_SOCKET_IFNAME="lo0"
 export OMP_NUM_THREADS="1"
+export TORCH_CPP_LOG_LEVEL=ERROR
 
 echo "=============================================="
 echo "Starting Full Fault Matrix"

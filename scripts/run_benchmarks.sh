@@ -12,6 +12,7 @@ CONFIG=$1
 
 export GLOO_SOCKET_IFNAME="lo0"
 export OMP_NUM_THREADS="1"
+export TORCH_CPP_LOG_LEVEL=ERROR
 
 echo "=============================================="
 echo "Running Benchmark with Validation DISABLED"
