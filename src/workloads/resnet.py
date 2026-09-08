@@ -68,7 +68,7 @@ class ResNetWorkload(Workload):
         )
         return dataloader, sampler
 
-    def train_step(self, model, optimizer, batch) -> float:
+    def train_step(self, model, optimizer, batch, scheduler=None, step=None, **kwargs) -> float:
         device = next(model.parameters()).device
         inputs, targets = batch
         inputs, targets = inputs.to(device), targets.to(device)
@@ -78,6 +78,9 @@ class ResNetWorkload(Workload):
         loss = nn.functional.cross_entropy(outputs, targets)
         loss.backward()
         optimizer.step()
+        
+        if scheduler is not None:
+            scheduler.step()
         
         return loss.item()
 
