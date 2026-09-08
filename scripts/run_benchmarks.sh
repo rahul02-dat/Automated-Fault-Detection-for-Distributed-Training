@@ -17,11 +17,11 @@ export TORCH_CPP_LOG_LEVEL=ERROR
 echo "=============================================="
 echo "Running Benchmark with Validation DISABLED"
 echo "=============================================="
-uv run torchrun --rdzv_endpoint=127.0.0.1:29505 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_benchmark --config $CONFIG --disable-validation
+uv run torchrun --local-addr=127.0.0.1 --rdzv_endpoint=127.0.0.1:29505 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_benchmark --config $CONFIG --disable-validation
 
 echo "=============================================="
 echo "Running Benchmark with Validation ENABLED"
 echo "=============================================="
-uv run torchrun --rdzv_endpoint=127.0.0.1:29506 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_benchmark --config $CONFIG
+uv run torchrun --local-addr=127.0.0.1 --rdzv_endpoint=127.0.0.1:29506 --standalone --nnodes=1 --nproc_per_node=2 -m src.experiments.run_benchmark --config $CONFIG
 
 echo "Benchmark complete! Check results/benchmarks/ directory."
