@@ -144,19 +144,23 @@ def main():
 
     # Validate at the end
     final_results = validate_cross_rank(registry, ctx)
+    
+    # Also compute standard evaluation and save it
+    eval_metric = None
+    if hasattr(workload, "evaluate"):
+        eval_kwargs = {"model": model}
+        if ema is not None:
+            eval_kwargs["ema"] = ema
+        if data_res is not None:
+            eval_kwargs["dataloader"] = dataloader
+        eval_metric = workload.evaluate(**eval_kwargs)
+        
     if rank == 0:
         final_val_path = os.path.join(resume_dir, f"validation_final_{total_steps}.json")
         with open(final_val_path, "w") as f:
             json.dump(final_results, f, indent=2)
             
-        # Also compute standard evaluation and save it
-        if hasattr(workload, "evaluate"):
-            eval_kwargs = {"model": model}
-            if ema is not None:
-                eval_kwargs["ema"] = ema
-            if data_res is not None:
-                eval_kwargs["dataloader"] = dataloader
-            eval_metric = workload.evaluate(**eval_kwargs)
+        if eval_metric is not None:
             eval_path = os.path.join(resume_dir, f"eval_final_{total_steps}.json")
             with open(eval_path, "w") as f:
                 json.dump({"loss": eval_metric}, f, indent=2)
