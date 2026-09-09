@@ -136,7 +136,10 @@ class ResNetWorkload(Workload):
             StateContract(
                 name="optimizer",
                 scope=StateScope.REPLICATED,
-                comparator=Comparator.CUSTOM
+                comparator=Comparator.ALLCLOSE,
+                rtol=1e-4,
+                atol=1e-5,
+                description="Optimizer state (param_groups + state). Uses ALLCLOSE for tensor buffers."
             ),
             getter=lambda ctx: ctx["optimizer"].state_dict()
         )
@@ -145,16 +148,18 @@ class ResNetWorkload(Workload):
             StateContract(
                 name="scheduler",
                 scope=StateScope.REPLICATED,
-                comparator=Comparator.CUSTOM
+                comparator=Comparator.EXACT,
+                description="Scheduler state (last_epoch, step_count, etc.). Must be strictly equal."
             ),
             getter=lambda ctx: ctx["scheduler"].state_dict()
         )
 
         registry.register(
             StateContract(
-                name="rng",
+                name="rng.torch_cpu",
                 scope=StateScope.PER_RANK,
-                comparator=Comparator.EXACT
+                comparator=Comparator.EXACT,
+                description="PyTorch CPU RNG state. PER_RANK because seeds are rank-offset."
             ),
-            getter=lambda ctx: ctx["rng"]
+            getter=lambda ctx: torch.get_rng_state()
         )

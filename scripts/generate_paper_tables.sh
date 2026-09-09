@@ -3,8 +3,17 @@ set -e
 
 echo "Generating paper tables from raw JSON outputs..."
 
-mkdir -p results/summary
-uv run python -m src.experiments.analyze_results > results/summary/paper_tables.md
+mkdir -p results/analysis
 
-echo "Tables generated at results/summary/paper_tables.md"
-cat results/summary/paper_tables.md
+uv run python -m src.experiments.analyze_results
+
+echo ""
+echo "Tables generated at results/analysis/paper_tables.md"
+echo ""
+
+# Also generate aggregate report if results exist
+if [ -d "results/raw" ]; then
+    echo "Generating aggregate experiment report..."
+    uv run python -m src.experiments.experiment_runner --raw-dir results/raw --output results/analysis/aggregate_report.txt
+    echo "Aggregate report at results/analysis/aggregate_report.txt"
+fi
