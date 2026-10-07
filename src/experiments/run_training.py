@@ -77,6 +77,9 @@ def main():
     if ema is not None:
         ctx["ema"] = ema
 
+    from src.runtime.seeds import capture_rng_state
+    ctx["rng"] = capture_rng_state(rank)
+
     # Setup dataloader if available
     data_res = workload.build_data()
     if data_res is not None:
@@ -112,6 +115,7 @@ def main():
 
         # Checkpointing at specific boundaries.
         if (step + 1) in ckpt_steps:
+            ctx["rng"] = capture_rng_state(rank)
             t0 = time.time()
             ckpt_path = os.path.join(out_dir, f"checkpoint_{step + 1}")
             ckpt_backend.save(ctx, ckpt_path)
@@ -119,6 +123,7 @@ def main():
 
     # Save final reference
     ctx["global_step"] = total_steps
+    ctx["rng"] = capture_rng_state(rank)
     t0 = time.time()
     final_path = os.path.join(out_dir, "checkpoint_final")
     ckpt_backend.save(ctx, final_path)
@@ -181,7 +186,7 @@ def main():
             validation_duration_ms=validation_duration_ms,
             training_duration_s=training_duration,
             checkpoint_duration_s=checkpoint_time,
-            final_metric=eval_metric,
+            reference_metric=eval_metric,
             config_hash=compute_config_hash(config),
             environment=collect_environment(),
             validation_results=final_results,

@@ -53,8 +53,11 @@ class SchedulerStaleStateFault(FaultInjector):
             "fault": self.name,
             "state": self.target_state,
             "rank": rank,
-            "before": {"last_epoch": before_epoch, "_step_count": before_step_count},
-            "after": {"last_epoch": after_epoch, "_step_count": after_step_count},
+            "path": "scheduler.last_epoch",
+            "type": "dict",
+            "shape": "[2 keys]",
+            "digest_before": str(before_epoch) + "," + str(before_step_count),
+            "digest_after": str(after_epoch) + "," + str(after_step_count),
             "mutation_applied": mutation_applied,
         }
 

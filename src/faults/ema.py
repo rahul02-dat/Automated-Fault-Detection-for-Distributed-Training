@@ -56,12 +56,21 @@ class EMAScalarOmissionFault(FaultInjector):
         # On rank > 0, the step should have been zeroed
         mutation_applied = (rank > 0 and before_val != after_val) or (rank == 0)
 
+        # For simple scalar or small tensors, we can just use string representation as digest
+        digest_before = str(before_val) if before_val is not None else "missing"
+        digest_after = str(after_val) if after_val is not None else "missing"
+        
+        dtype = type(before_val).__name__ if before_val is not None else "unknown"
+
         return {
             "fault": self.name,
             "state": self.target_state,
             "rank": rank,
-            "before": before_val,
-            "after": after_val,
+            "path": "ema.step",
+            "type": dtype,
+            "shape": "scalar",
+            "digest_before": digest_before,
+            "digest_after": digest_after,
             "mutation_applied": mutation_applied,
         }
 

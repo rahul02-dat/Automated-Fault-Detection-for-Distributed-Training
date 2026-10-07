@@ -77,6 +77,14 @@ class ResNetWorkload(Workload):
         outputs = model(inputs)
         loss = nn.functional.cross_entropy(outputs, targets)
         loss.backward()
+        
+        # Synchronize gradients manually since we're not using DDP
+        if dist.is_initialized():
+            for p in model.parameters():
+                if p.grad is not None:
+                    dist.all_reduce(p.grad.data)
+                    p.grad.data /= dist.get_world_size()
+
         optimizer.step()
         
         if scheduler is not None:

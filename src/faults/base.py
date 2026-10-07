@@ -35,9 +35,13 @@ class FaultInjector(abc.ABC):
         Returns a report dict containing at minimum:
             fault: str
             state: str (target state path)
+            rank: int
+            path: str (exact mutation path)
+            type: str (data type)
+            shape: str (tensor or structure shape)
+            digest_before: str
+            digest_after: str
             mutation_applied: bool
-            before: <value or digest>
-            after: <value or digest>
 
         A fault experiment is invalid if the intended state was not changed.
         """

@@ -37,8 +37,11 @@ class DataCursorMismatchFault(FaultInjector):
             "fault": self.name,
             "state": self.target_state,
             "rank": rank,
-            "before": before_val,
-            "after": after_val,
+            "path": "global_step",
+            "type": "int",
+            "shape": "scalar",
+            "digest_before": str(before_val) if before_val is not None else "missing",
+            "digest_after": str(after_val) if after_val is not None else "missing",
             "mutation_applied": mutation_applied,
         }
 

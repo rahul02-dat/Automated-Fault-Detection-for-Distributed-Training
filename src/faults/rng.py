@@ -21,8 +21,11 @@ class RNGStateOmissionFault(FaultInjector):
 
     def apply(self, state: Dict[str, Any]) -> Dict[str, Any]:
         # Perturb the RNG state so it doesn't match the resumed state
-        torch.manual_seed(9999 + dist.get_rank())
-        random.seed(9999 + dist.get_rank())
+        # The true bug is forgetting to restore RNG state, which means the
+        # process uses its initialized seed state rather than the resumed one.
+        # So we just delete the rng state from the checkpoint payload if it exists.
+        if "rng" in state:
+            del state["rng"]
         return state
 
     def verify_mutation(self, before_state: Dict[str, Any], after_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,24 +38,30 @@ class RNGStateOmissionFault(FaultInjector):
         # We capture torch RNG state before and after as byte digests
         import hashlib
 
-        before_rng = before_state.get("_rng_torch_cpu_before")
-        after_rng = after_state.get("_rng_torch_cpu_after")
-
-        if before_rng is not None and after_rng is not None:
+        # Since we simulate omission by deleting 'rng' from the checkpoint state,
+        # we check if it is missing in after_state but present in before_state.
+        has_rng_before = "rng" in before_state
+        has_rng_after = "rng" in after_state
+        mutation_applied = has_rng_before and not has_rng_after
+        
+        # for diagnostic purposes we can hash the torch_cpu state if it existed
+        before_rng = before_state.get("rng", {}).get("torch_cpu")
+        if before_rng is not None:
             before_digest = hashlib.sha256(before_rng.numpy().tobytes()).hexdigest()[:16]
-            after_digest = hashlib.sha256(after_rng.numpy().tobytes()).hexdigest()[:16]
-            mutation_applied = before_digest != after_digest
         else:
             before_digest = "unavailable"
-            after_digest = "unavailable"
-            mutation_applied = True  # Assume applied since we set the seed explicitly
+            
+        after_digest = "deleted" if mutation_applied else before_digest
 
         return {
             "fault": self.name,
             "state": self.target_state,
             "rank": rank,
-            "before_digest": before_digest,
-            "after_digest": after_digest,
+            "path": "torch.random.get_rng_state()",
+            "type": "bytearray",
+            "shape": f"[{len(before_rng) if before_rng is not None else 0}]",
+            "digest_before": before_digest,
+            "digest_after": after_digest,
             "mutation_applied": mutation_applied,
         }
 

@@ -85,11 +85,6 @@ def main():
     # 2. Capture pre-mutation state for verification
     before_state = _deep_copy_state(state)
 
-    # For RNG faults, also capture the RNG state before
-    rng_before = None
-    if fault_name == "rng_state_omission":
-        rng_before = torch.get_rng_state()
-
     # 3. Inject the fault offline
     mutation_report = None
     if fault_name != "none":
@@ -99,11 +94,6 @@ def main():
         # Capture post-mutation state for verification
         after_state = _deep_copy_state(state)
 
-        # For RNG faults, add RNG state snapshots to the states
-        if fault_name == "rng_state_omission":
-            before_state["_rng_torch_cpu_before"] = rng_before
-            after_state["_rng_torch_cpu_after"] = torch.get_rng_state()
-
         # Verify the mutation was actually applied
         mutation_report = fault_injector.verify_mutation(before_state, after_state)
 
@@ -111,10 +101,18 @@ def main():
     out_state_file = os.path.join(mutated_ckpt_dir, f"state_rank{rank}.pt")
     torch.save(state, out_state_file)
 
-    # 5. Copy the manifest over
+    # 5. Copy and update the manifest over
     src_manifest = os.path.join(src_ckpt_dir, f"manifest_rank{rank}.json")
     out_manifest = os.path.join(mutated_ckpt_dir, f"manifest_rank{rank}.json")
-    shutil.copyfile(src_manifest, out_manifest)
+    
+    with open(src_manifest, "r") as f:
+        manifest_data = json.load(f)
+    
+    # Update state_items to match the mutated state (simulating it was saved this way)
+    manifest_data["state_items"] = list(state.keys())
+    
+    with open(out_manifest, "w") as f:
+        json.dump(manifest_data, f, indent=2)
 
     # 6. Save the mutation verification report
     if mutation_report is not None:

@@ -7,7 +7,7 @@ set -e
 # EXPECTED_DETECTION from UNEXPECTED_PASS/UNEXPECTED_FAILURE.
 
 WORKLOADS=("tiny_transformer" "resnet" "small_transformer")
-FAULTS=("ema_scalar_omission" "scheduler_stale_state" "rng_state_omission" "data_cursor_mismatch" "optimizer_state_corruption")
+FAULTS=("none" "ema_scalar_omission" "scheduler_stale_state" "rng_state_omission" "data_cursor_mismatch" "optimizer_state_corruption")
 REPETITIONS=${1:-1}
 
 export GLOO_SOCKET_IFNAME="lo0"

@@ -113,6 +113,10 @@ def main():
                 data_iter = iter(dataloader)
                 next(data_iter)
 
+    from src.runtime.seeds import restore_rng_state
+    if "rng" in ctx:
+        restore_rng_state(ctx["rng"])
+
     # 2. Validate state immediately upon restore
     registry = StateRegistry()
     workload.register_state_contracts(registry, ctx)
@@ -209,6 +213,13 @@ def main():
         else:
             outcome = ExperimentOutcome.EXPECTED_DETECTION.value if detected else ExperimentOutcome.UNEXPECTED_PASS.value
 
+        # Load mutation report if available
+        mutation_report = {}
+        mutation_path_json = os.path.join(resume_dir, "fault_mutation_rank0.json")
+        if os.path.exists(mutation_path_json):
+            with open(mutation_path_json, "r") as f:
+                mutation_report = json.load(f)
+
         from src.runtime.environment import collect_environment
         result = ExperimentResult(
             experiment_id=config.get("experiment_id", "run"),
@@ -223,20 +234,27 @@ def main():
             checkpoint_step=loop_start,
             total_steps=total_steps,
             validation_enabled=True,
+            
+            mutation_applied=mutation_report.get("mutation_applied", False),
+            mutation_target=mutation_report.get("state"),
+            mutation_path=mutation_report.get("path"),
+            mutation_before_digest=mutation_report.get("digest_before"),
+            mutation_after_digest=mutation_report.get("digest_after"),
+
             status=ExperimentStatus.FAIL.value if detected else ExperimentStatus.PASS.value,
             outcome=outcome,
             detected=detected,
             detected_states=list(set(failed_contracts + restore_failed)),
-            root_cause_state=attribution.get("root_cause_state"),
+            root_cause=attribution.get("root_cause"),
             expected_primary=attribution.get("expected_primary", []),
             observed_primary=attribution.get("observed_primary", []),
             expected_secondary=attribution.get("expected_secondary", []),
-            observed_secondary=attribution.get("observed_secondary", []),
+            downstream_effects=attribution.get("downstream_effects", []),
             causal_attribution=attribution.get("causal_attribution"),
             validation_duration_ms=val_restore_ms + val_final_ms,
             training_duration_s=training_duration,
             checkpoint_duration_s=checkpoint_time,
-            final_metric=eval_metric,
+            resumed_metric=eval_metric,
             config_hash=compute_config_hash(config),
             environment=collect_environment(),
             validation_results=final_results,

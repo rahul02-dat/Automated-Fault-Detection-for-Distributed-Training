@@ -24,9 +24,11 @@ class TinyTransformer(nn.Module):
     def _deterministic_init(self, seed: int):
         g = torch.Generator().manual_seed(seed)
         with torch.no_grad():
-            for p in self.parameters():
+            for name, p in self.named_parameters():
                 if p.dim() > 1:
                     nn.init.xavier_uniform_(p, generator=g)
+                elif 'weight' in name and 'norm' in name.lower():
+                    nn.init.ones_(p)
                 else:
                     nn.init.zeros_(p)
 

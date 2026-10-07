@@ -51,7 +51,7 @@ def test_transformer_training_and_resume(transformer_config):
     
     cmd_train = [
         "torchrun",
-        "--rdzv_endpoint=localhost:29502",
+        "--rdzv_endpoint=127.0.0.1:29502",
         "--standalone",
         "--nnodes=1",
         "--nproc_per_node=2",
@@ -69,7 +69,7 @@ def test_transformer_training_and_resume(transformer_config):
     # 2. Run Resume
     cmd_resume = [
         "torchrun",
-        "--rdzv_endpoint=localhost:29502",
+        "--rdzv_endpoint=127.0.0.1:29502",
         "--standalone",
         "--nnodes=1",
         "--nproc_per_node=2",

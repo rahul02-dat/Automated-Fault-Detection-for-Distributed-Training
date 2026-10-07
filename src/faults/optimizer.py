@@ -58,10 +58,12 @@ class OptimizerStateCorruptionFault(FaultInjector):
             "fault": self.name,
             "state": self.target_state,
             "rank": rank,
-            "before": {"lr": before_lr, "digest": before_digest},
-            "after": {"lr": after_lr, "digest": after_digest},
+            "path": "optimizer.param_groups[].lr",
+            "type": "float_list",
+            "shape": f"[{len(before_lr) if before_lr else 0}]",
+            "digest_before": before_digest if before_digest else "missing",
+            "digest_after": after_digest if after_digest else "missing",
             "mutation_applied": mutation_applied,
-            "mutation": "lr_zeroed",
         }
 
     def metadata(self) -> Dict[str, Any]:

@@ -96,11 +96,21 @@ def test_rng_fault_detected(rng_fault_dir):
     assert os.path.exists(val_path)
     with open(val_path, "r") as f:
         results = json.load(f)
-    # The fault sets rank 1's torch rng to initial state
+    # The fault sets rank 1's torch rng to initial state, but it's PER_RANK so cross-rank skips it.
     rng_res = next((r for r in results if r["state_name"] == "rng.torch_cpu"), None)
     if rng_res:
-        assert rng_res["status"] == "FAIL"
+        assert rng_res["status"] == "SKIP"
 
+    # The downstream effect should be visible as a divergence in eval_loss compared to baseline
+    baseline_eval_path = os.path.join(os.path.dirname(rng_fault_dir), "eval_final.json")
+    resume_eval_path = os.path.join(rng_fault_dir, "eval_final_10.json")
+    
+    with open(baseline_eval_path, "r") as f:
+        baseline_loss = json.load(f)["loss"]
+    with open(resume_eval_path, "r") as f:
+        resume_loss = json.load(f)["loss"]
+        
+    assert baseline_loss != resume_loss
 def test_dataloader_fault_detected(dataloader_fault_dir):
     val_path = os.path.join(dataloader_fault_dir, "validation_restore_5.json")
     assert os.path.exists(val_path)
