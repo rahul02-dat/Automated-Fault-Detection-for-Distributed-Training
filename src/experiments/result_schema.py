@@ -66,30 +66,46 @@ class ExperimentResult:
     checkpoint_step: int = 0
     total_steps: int = 0
     validation_enabled: bool = True
+    validation_mode: str = "full_gather"
+
+    # --- Mutation Evidence ---
+    mutation_applied: Optional[bool] = None
+    mutation_target: Optional[str] = None
+    mutation_path: Optional[str] = None
+    mutation_before_digest: Optional[str] = None
+    mutation_after_digest: Optional[str] = None
 
     # --- Results ---
     status: str = ExperimentStatus.UNKNOWN.value
     outcome: str = ""
     detected: bool = False
+    expected_contracts: List[str] = field(default_factory=list)
+    observed_contracts: List[str] = field(default_factory=list)
     detected_states: List[str] = field(default_factory=list)
-    root_cause_state: Optional[str] = None
+    root_cause: Optional[str] = None
 
     # --- Causal attribution ---
     expected_primary: List[str] = field(default_factory=list)
     observed_primary: List[str] = field(default_factory=list)
     expected_secondary: List[str] = field(default_factory=list)
     observed_secondary: List[str] = field(default_factory=list)
+    downstream_effects: List[str] = field(default_factory=list)
     causal_attribution: Optional[str] = None  # "PASS" or "FAIL"
 
     # --- Timing ---
     validation_duration_ms: float = 0.0
     training_duration_s: float = 0.0
     checkpoint_duration_s: float = 0.0
+    load_duration_ms: float = 0.0
+    digest_duration_ms: float = 0.0
+    communication_duration_ms: float = 0.0
+    detailed_comparison_duration_ms: float = 0.0
 
     # --- Metrics ---
-    final_metric: Optional[float] = None
+    resumed_metric: Optional[float] = None
     reference_metric: Optional[float] = None
     metric_delta: Optional[float] = None
+    state_matches: Dict[str, Any] = field(default_factory=dict)
 
     # --- Reproducibility ---
     git_sha: str = ""
@@ -106,6 +122,21 @@ class ExperimentResult:
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+            
+        valid_phases = {e.value for e in ExperimentPhase}
+        if self.phase not in valid_phases:
+            raise ValueError(f"Invalid phase: {self.phase}")
+            
+        valid_statuses = {e.value for e in ExperimentStatus}
+        if self.status not in valid_statuses:
+            raise ValueError(f"Invalid status: {self.status}")
+            
+        valid_outcomes = {e.value for e in ExperimentOutcome} | {""}
+        if self.outcome not in valid_outcomes:
+            raise ValueError(f"Invalid outcome: {self.outcome}")
+            
+        if self.world_size < 1:
+            raise ValueError(f"Invalid world_size: {self.world_size}")
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dict suitable for JSON."""

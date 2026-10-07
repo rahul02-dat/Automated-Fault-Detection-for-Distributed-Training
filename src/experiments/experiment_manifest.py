@@ -37,6 +37,11 @@ class ExperimentManifest:
     checkpoint_step: int = 0
     total_steps: int = 0
 
+    # --- Tolerances ---
+    comparator: str = "EXACT"
+    rtol: Optional[float] = None
+    atol: Optional[float] = None
+
     # --- Software versions ---
     python_version: str = ""
     torch_version: str = ""
@@ -53,6 +58,19 @@ class ExperimentManifest:
             self.timestamp = datetime.datetime.utcnow().isoformat() + "Z"
         if not self.git_sha:
             self.git_sha = get_git_sha()
+            
+        if self.world_size < 1:
+            raise ValueError(f"Invalid world_size: {self.world_size}")
+            
+        valid_comparators = {"EXACT", "ALLCLOSE", "HASH"}
+        if self.comparator not in valid_comparators:
+            raise ValueError(f"Invalid comparator: {self.comparator}")
+            
+        if self.rtol is not None and not isinstance(self.rtol, (float, int)):
+            raise TypeError(f"Invalid rtol type: {type(self.rtol)}")
+            
+        if self.atol is not None and not isinstance(self.atol, (float, int)):
+            raise TypeError(f"Invalid atol type: {type(self.atol)}")
 
     @classmethod
     def from_config(cls, config: Dict[str, Any], run_id: str = "") -> "ExperimentManifest":
@@ -63,6 +81,8 @@ class ExperimentManifest:
         training = config.get("training", {})
         dist_cfg = config.get("distributed", {})
         workload_cfg = config.get("workload", {})
+        val_cfg = config.get("validation", {})
+        tolerances = val_cfg.get("tolerances", {})
 
         cuda_version = ""
         if torch.cuda.is_available():
@@ -81,6 +101,9 @@ class ExperimentManifest:
             seed=training.get("seed", 42),
             checkpoint_step=training.get("checkpoint_steps", [0])[0] if training.get("checkpoint_steps") else 0,
             total_steps=training.get("total_steps", 0),
+            comparator=val_cfg.get("comparator", "EXACT"),
+            rtol=tolerances.get("rtol", None),
+            atol=tolerances.get("atol", None),
             python_version=sys.version,
             torch_version=torch.__version__,
             cuda_version=cuda_version,
